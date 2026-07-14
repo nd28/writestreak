@@ -1,0 +1,28 @@
+{
+  "name": "writestreak",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": {
+    "writestreak": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.tsx",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@msgpack/msgpack": "^3.0.0-beta2",
+    "ink": "^5.1.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/react": "^18.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.10"
+  }
+}
