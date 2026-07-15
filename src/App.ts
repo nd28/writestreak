@@ -181,15 +181,15 @@ async function main() {
     const visible = sorted.slice(0, 15);
 
     const historyBox = Box(
-      { flexDirection: "column", flexGrow: 1, paddingX: 1 },
+      { flexDirection: "column", flexGrow: 1, paddingX: 1, gap: 1 },
       Box({ flexDirection: "row", justifyContent: "space-between" },
         Text({ content: "SESSION HISTORY", fg: "#FFFF00", attributes: TextAttributes.BOLD }),
-        Text({ content: `${stats.sessions.length} sessions | Esc to close`, fg: "#888888" })
+        Text({ content: `${stats.sessions.length} sessions · Click mode label to close`, fg: "#888888" })
       )
     );
 
     if (visible.length === 0) {
-      historyBox.add(Text({ content: "No sessions yet. Start writing!", fg: "#888888" }));
+      historyBox.add(Text({ content: "No sessions yet — start writing!", fg: "#666666" }));
     } else {
       visible.forEach((session, i) => {
         const date = new Date(session.startedAt);
@@ -200,11 +200,11 @@ async function main() {
           : "(empty)";
 
         historyBox.add(Box({ flexDirection: "row", gap: 1 },
-          Text({ content: `${String(i + 1).padStart(2)}.`, fg: "#888888" }),
+          Text({ content: `${String(i + 1).padStart(2)}.`, fg: "#666666" }),
           Text({ content: dateStr, fg: "#00FFFF" }),
           Text({ content: timeStr, fg: "#888888" }),
           Text({ content: `${session.wordCount}w · ${session.xpEarned || 0} XP`, fg: "#00FF00" }),
-          Text({ content: preview, fg: "#888888" })
+          Text({ content: preview, fg: "#666666" })
         ));
       });
     }
