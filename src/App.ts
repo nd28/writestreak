@@ -774,8 +774,8 @@ async function main() {
     });
 
     statusRight.add(new TextRenderable(renderer, {
-      content: "^N new ^S save ^E export ^Q quit",
-      fg: "#888888"
+      content: "^N new  ^S save  ^E export  ^Q quit",
+      fg: "#555555"
     }));
 
     statusBar.add(statusLeft);
