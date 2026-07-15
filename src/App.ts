@@ -58,6 +58,14 @@ async function main() {
 
   const streakInfo = updateStreak(stats);
 
+  function flashModeLabel(color: string, durationMs: number) {
+    if (!modeBoxRef) return;
+    modeBoxRef.backgroundColor = color;
+    setTimeout(() => {
+      if (modeBoxRef) modeBoxRef.backgroundColor = primaryColor;
+    }, durationMs);
+  }
+
   function showMessage(msg: string) {
     message = msg;
     updateMessage();
@@ -137,6 +145,7 @@ async function main() {
     mode = modes[nextIdx];
     buildMiddleSection();
     updateModeIndicator();
+    flashModeLabel("#FFFFFF", 500);
   }
 
   function closeGuide() {
@@ -362,6 +371,8 @@ async function main() {
   let milestoneText: TextRenderable | null = null;
   let milestoneTimeout: NodeJS.Timeout | null = null;
   let modeText: TextRenderable | null = null;
+  let modeBoxRef: BoxRenderable | null = null;
+  let bannerBoxRef: BoxRenderable | null = null;
   let messageText: TextRenderable | null = null;
   let middleContainer: BoxRenderable | null = null;
   let mainContainer: BoxRenderable | null = null;
@@ -579,6 +590,12 @@ async function main() {
     stats = { ...stats, primaryColor: newColor };
     exportToBin(stats, SAVE_PATH);
     buildUI();
+    if (bannerBoxRef) {
+      bannerBoxRef.borderColor = "#FFFFFF";
+      setTimeout(() => {
+        if (bannerBoxRef) bannerBoxRef.borderColor = newColor;
+      }, 300);
+    }
   }
 
   function buildUI() {
@@ -605,6 +622,7 @@ async function main() {
       paddingX: 2,
       paddingY: 1
     });
+    bannerBoxRef = bannerBox;
 
     const titleRow = new BoxRenderable(renderer, {
       flexDirection: "row",
@@ -784,6 +802,7 @@ async function main() {
     });
 
     modeBox.add(modeText);
+    modeBoxRef = modeBox;
     statusLeft.add(modeBox);
     statusLeft.add(new TextRenderable(renderer, { content: sessionTitle }));
 

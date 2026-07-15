@@ -59,7 +59,7 @@ src/
 
 ## Current State
 
-**Version:** 1.3.4
+**Version:** 1.3.10
 
 ### Features Implemented
 - Full OpenTUI imperative UI (no React/Ink)
@@ -70,17 +70,19 @@ src/
 - Auto-resume: last session content loaded on startup
 - Session save / new session / export to .wbin
 - Session history view (Ctrl+H or mode cycle), shows last 15 sessions
-- Insights panel (Ctrl+I or mode cycle): disk size, avg words, best session, time writing, best day, 7-day bar chart
+- Insights panel (Ctrl+I or mode cycle): empty state for new users, disk, avg words, best session, time, best day, 7-day bar chart
 - First-launch guide (skippable with `--skip-guide`)
 - Color theming via `--color #hex` flag, persisted to save file
 - Color cycling button in banner (Rose / Sky / Dim), label shows current color name
 - Clickable mode label — cycles writing → history → insights
+- Flash feedback: mode label flashes white on mode switch (500ms), banner border flashes on color cycle (300ms)
 - Mouse support enabled
 - Version display (`v{VERSION}`) next to WRITESTREAK title
 - Message bar with timed toasts ("Session saved!", "Exported to...", etc.)
-- Live XP feedback text (`+{n} XP`) in editor stats row, auto-clears after 2s; gold if streak active, green otherwise
-- Level-up celebration toast: prominent 3-second toast when crossing a level threshold (e.g. "⬆ LEVEL UP! Apprentice Writer (LVL 2)")
-- Streak fire indicator: 🔥 emoji(s) scale with streak length (1-4 fires, color gradient gold → orange → red)
+- Live XP feedback text (`+{n} XP`) in editor stats row, auto-clears after 1.5s; gold if streak active, green otherwise
+- Milestone popup: magenta text ("🎉 50 words! +50 XP") in stats row, auto-clears after 3s
+- Level-up celebration toast: prominent 3-second toast when crossing a level threshold (e.g. "⬆ LEVEL UP! Apprentice Writer (LVL 2)"). Shows XP/word bonus for next level.
+- Streak fire indicator: 🔥 emoji(s) scale with streak length (1-4 fires, color gradient gold → orange → red), includes "streak" label text
 - Session XP tracking: XP accumulated per session is stored and displayed in history (`· {n} XP`) and insights best session
 - MessagePack binary storage (`writestreak.bin`)
 - 59 unit tests (scoring, levels, msgpack) — all passing
