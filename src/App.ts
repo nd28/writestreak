@@ -537,6 +537,7 @@ async function main() {
         flexDirection: "column",
         flexGrow: 1,
         maxWidth: 100,
+        minWidth: 40,
         alignSelf: "center"
       });
 
