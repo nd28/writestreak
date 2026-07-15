@@ -304,37 +304,39 @@ async function main() {
       { flexDirection: "column", flexGrow: 1, paddingX: 1, gap: 1 },
       Box({ flexDirection: "row", justifyContent: "space-between" },
         Text({ content: "INSIGHTS", fg: "#FFFF00", attributes: TextAttributes.BOLD }),
-        Text({ content: "Esc to close", fg: "#888888" })
+        Text({ content: "Click mode label to close", fg: "#888888" })
       ),
-      Box({ flexDirection: "row", gap: 2 },
-        Box({ flexDirection: "column" },
-          Text({ content: "DISK SIZE", fg: "#888888" }),
-          Text({ content: diskLabel, fg: primaryColor, attributes: TextAttributes.BOLD })
-        ),
-        Box({ flexDirection: "column" },
-          Text({ content: "AVG WORDS", fg: "#888888" }),
-          Text({ content: `${avgWords}`, fg: "#FFFFFF", attributes: TextAttributes.BOLD })
-        ),
-        Box({ flexDirection: "column" },
-          Text({ content: "BEST SESSION", fg: "#888888" }),
-          Text({ content: bestSession ? `${bestSession.wordCount}w · ${bestSession.xpEarned || 0} XP` : "N/A", fg: "#00FF00", attributes: TextAttributes.BOLD })
-        ),
-        Box({ flexDirection: "column" },
-          Text({ content: "TIME WRITING", fg: "#888888" }),
-          Text({ content: timeLabel, fg: "#00FFFF", attributes: TextAttributes.BOLD })
-        ),
-        Box({ flexDirection: "column" },
-          Text({ content: "BEST DAY", fg: "#888888" }),
-          Text({ content: bestDay, fg: "#FFD700", attributes: TextAttributes.BOLD })
-        )
-      ),
+      totalSessions === 0
+        ? Text({ content: "Write a few sessions to see insights", fg: "#666666" })
+        : Box({ flexDirection: "row", gap: 3 },
+            Box({ flexDirection: "column" },
+              Text({ content: "DISK", fg: "#666666" }),
+              Text({ content: diskLabel, fg: primaryColor, attributes: TextAttributes.BOLD })
+            ),
+            Box({ flexDirection: "column" },
+              Text({ content: "AVG WORDS", fg: "#666666" }),
+              Text({ content: `${avgWords}`, fg: "#FFFFFF", attributes: TextAttributes.BOLD })
+            ),
+            Box({ flexDirection: "column" },
+              Text({ content: "BEST SESSION", fg: "#666666" }),
+              Text({ content: bestSession ? `${bestSession.wordCount}w · ${bestSession.xpEarned || 0} XP` : "N/A", fg: "#00FF00", attributes: TextAttributes.BOLD })
+            ),
+            Box({ flexDirection: "column" },
+              Text({ content: "TIME", fg: "#666666" }),
+              Text({ content: timeLabel, fg: "#00FFFF", attributes: TextAttributes.BOLD })
+            ),
+            Box({ flexDirection: "column" },
+              Text({ content: "BEST DAY", fg: "#666666" }),
+              Text({ content: bestDay, fg: "#FFD700", attributes: TextAttributes.BOLD })
+            )
+          ),
       Text({ content: " " }),
       Text({ content: "LAST 7 DAYS", fg: "#FFFF00", attributes: TextAttributes.BOLD }),
       ...last7.map(d => {
         const barLen = Math.round((d.count / maxDay) * 20);
         const bar = "█".repeat(barLen) + "░".repeat(20 - barLen);
         return Box({ flexDirection: "row", gap: 1 },
-          Text({ content: d.label, fg: "#888888" }),
+          Text({ content: d.label, fg: "#666666" }),
           Text({ content: bar, fg: primaryColor }),
           Text({ content: `${d.count}`, fg: "#FFFFFF" })
         );
