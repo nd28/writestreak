@@ -618,7 +618,7 @@ async function main() {
 
     levelTitleText = new TextRenderable(renderer, {
       content: "",
-      fg: "#FFFF00"
+      fg: "#AAAAAA"
     });
 
     levelBar.add(levelText);
@@ -664,7 +664,8 @@ async function main() {
       flexDirection: "row",
       justifyContent: "space-between",
       width: "100%",
-      marginTop: 1
+      marginTop: 1,
+      gap: 2
     });
 
     const xpBlock = new BoxRenderable(renderer, { flexDirection: "column", alignItems: "center" });
