@@ -455,7 +455,7 @@ async function main() {
     } else {
       const fireCount = Math.min(Math.floor(streak / 3) + 1, 4);
       const fires = "🔥".repeat(fireCount);
-      streakContent = `${fires} ${streak}d`;
+      streakContent = `${fires} ${streak}d streak`;
 
       if (streak <= 2) {
         streakColor = "#FFD700"; // gold
