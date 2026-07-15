@@ -1,8 +1,10 @@
-import { createCliRenderer, Box, Text, TextAttributes, TextareaRenderable, BoxRenderable, TextRenderable } from "@opentui/core";
+import { createCliRenderer, Box, Text, TextAttributes, TextareaRenderable, BoxRenderable, TextRenderable, ScrollBoxRenderable, InputRenderable, SelectRenderable } from "@opentui/core";
 import { existsSync, statSync } from "fs";
 import { countWords, calculateXp, updateStreak } from "./game/scoring.js";
 import { getLevelInfo, LEVELS } from "./game/levels.js";
 import { exportToBin, importFromBin, getDefaultStats } from "./storage/msgpack.js";
+import { filterSessions, PAGE_SIZE, FILTER_ORDER } from "./history/filter.js";
+import type { FilterKind } from "./history/filter.js";
 import type { PlayerStats, WritingSession } from "./types.js";
 import pkg from "../package.json" with { type: "json" };
 
@@ -22,6 +24,22 @@ function parseColorArg(): string | null {
 
 function parseSkipGuide(): boolean {
   return process.argv.includes("--skip-guide");
+}
+
+function wrapText(text: string, width: number): string {
+  return text.split("\n").map(line => {
+    if (line.length <= width) return line;
+    const words = line.split(" ");
+    const out: string[] = [];
+    let cur = "";
+    for (const w of words) {
+      if (cur.length === 0) cur = w;
+      else if ((cur + " " + w).length <= width) cur += " " + w;
+      else { out.push(cur); cur = w; }
+    }
+    if (cur.length > 0) out.push(cur);
+    return out.join(" ");
+  }).join("\n");
 }
 
 async function main() {
@@ -49,6 +67,17 @@ async function main() {
   let previousLevel = getLevelInfo(stats.totalXp).level;
   const sessionStart = Date.now();
   const sessionTitle = `Session ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
+
+  let historyView: "list" | "reader" = "list";
+  let historyQuery = "";
+  let historyPage = 0;
+  let historySelectedId: string | null = null;
+  let historyReaderId: string | null = null;
+  let historyFilter: FilterKind = "all";
+  let searchFocused = false;
+  let searchInput: InputRenderable | null = null;
+  let historySelect: SelectRenderable | null = null;
+  let historyScroll: ScrollBoxRenderable | null = null;
 
   const lastSession = stats.sessions.length > 0 ? stats.sessions[stats.sessions.length - 1] : null;
   if (lastSession?.content) {
@@ -112,6 +141,25 @@ async function main() {
     showMessage("Session saved!");
   }
 
+  function resumeSessionIntoEditor() {
+    if (!historyReaderId) return;
+    const session = stats.sessions.find(s => s.id === historyReaderId);
+    if (!session) {
+      showMessage("Session not found");
+      return;
+    }
+    currentText = session.content;
+    input.setText(session.content);
+    prevWordCount = countWords(currentText);
+    sessionXp = 0;
+    historyView = "list";
+    mode = "writing";
+    buildMiddleSection();
+    updateEditor();
+    updateHeaderStats();
+    showMessage(`Resumed session (${prevWordCount} words)`);
+  }
+
   function newSession() {
     saveSession();
     currentText = "";
@@ -167,6 +215,32 @@ async function main() {
       return;
     }
 
+    if (mode === "history" && historyView === "reader") {
+      if (key.name === "r" && !key.ctrl) {
+        resumeSessionIntoEditor();
+        return;
+      }
+      if (key.name === "escape") {
+        historyView = "list";
+        buildMiddleSection();
+        return;
+      }
+      if (key.name === "backspace") {
+        historyView = "list";
+        buildMiddleSection();
+        return;
+      }
+      if (key.ctrl && key.name === "h") {
+        historyView = "list";
+        buildMiddleSection();
+        return;
+      }
+      if (historyScroll && (key.name === "up" || key.name === "down" || key.name === "pageup" || key.name === "pagedown" || key.name === "home" || key.name === "end")) {
+        historyScroll.handleKeyPress(key);
+        return;
+      }
+    }
+
     if (key.ctrl && key.name === "q") {
       saveSession();
       showMessage("Saved. Goodbye!");
@@ -191,39 +265,118 @@ async function main() {
   });
 
   function buildHistory() {
-    const sorted = [...stats.sessions].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
-    const visible = sorted.slice(0, 15);
+    return historyView === "reader" ? buildHistoryReader() : buildHistoryList();
+  }
 
-    const historyBox = Box(
-      { flexDirection: "column", flexGrow: 1, paddingX: 1, gap: 1 },
-      Box({ flexDirection: "row", justifyContent: "space-between" },
-        Text({ content: "SESSION HISTORY", fg: "#FFFF00", attributes: TextAttributes.BOLD }),
-        Text({ content: `${stats.sessions.length} sessions · Click mode label to close`, fg: "#888888" })
-      )
-    );
+  function buildHistoryList() {
+    const { pageItems, total, totalPages, page } = filterSessions(stats.sessions, {
+      query: historyQuery,
+      filter: historyFilter,
+      page: historyPage,
+      pageSize: PAGE_SIZE,
+    });
+    historyPage = page;
 
-    if (visible.length === 0) {
-      historyBox.add(Text({ content: "No sessions yet — start writing!", fg: "#666666" }));
-    } else {
-      visible.forEach((session, i) => {
-        const date = new Date(session.startedAt);
-        const dateStr = date.toLocaleDateString();
-        const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        const preview = session.content
-          ? session.content.replace(/\n/g, " ").slice(0, 40)
-          : "(empty)";
+    const historyBox = new BoxRenderable(renderer, {
+      flexDirection: "column",
+      flexGrow: 1,
+      paddingX: 1,
+      gap: 1,
+    });
 
-        historyBox.add(Box({ flexDirection: "row", gap: 1 },
-          Text({ content: `${String(i + 1).padStart(2)}.`, fg: "#666666" }),
-          Text({ content: dateStr, fg: "#00FFFF" }),
-          Text({ content: timeStr, fg: "#888888" }),
-          Text({ content: `${session.wordCount}w · ${session.xpEarned || 0} XP`, fg: "#00FF00" }),
-          Text({ content: preview, fg: "#666666" })
-        ));
-      });
+    const headerRow = new BoxRenderable(renderer, { flexDirection: "row", justifyContent: "space-between", width: "100%" });
+    headerRow.add(new TextRenderable(renderer, { content: "SESSION HISTORY", fg: "#FFFF00", attributes: TextAttributes.BOLD }));
+    headerRow.add(new TextRenderable(renderer, { content: `${total} sessions · Pg [${page + 1}/${totalPages}]`, fg: "#888888" }));
+    historyBox.add(headerRow);
+
+    if (total === 0) {
+      historyBox.add(new TextRenderable(renderer, { content: "No sessions match — start writing!", fg: "#666666" }));
+      historyBox.add(new TextRenderable(renderer, { content: "Press Esc to clear filters.", fg: "#666666" }));
+      return historyBox;
     }
 
+    historySelect = new SelectRenderable(renderer, {
+      options: pageItems.map((s, i) => {
+        const d = new Date(s.startedAt);
+        const dateStr = d.toLocaleDateString();
+        const timeStr = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        const preview = s.content ? s.content.replace(/\n/g, " ").slice(0, 40) : "(empty)";
+        const name = `${String(i + 1).padStart(2)}. ${dateStr} ${timeStr}  ${s.wordCount}w ${s.xpEarned || 0}xp  ${preview}`;
+        return { name, description: "", value: s.id };
+      }),
+      selectedIndex: historySelectedId
+        ? Math.max(0, pageItems.findIndex(s => s.id === historySelectedId))
+        : 0,
+      showScrollIndicator: true,
+      wrapSelection: false,
+      focusedBackgroundColor: primaryColor,
+      focusedTextColor: "#000000",
+      selectedBackgroundColor: "#333333",
+    });
+
+    historySelect.on("selectionChanged", (_idx: number, opt: { value?: any } | null) => {
+      if (opt && opt.value) historySelectedId = opt.value as string;
+    });
+    historySelect.on("itemSelected", (_idx: number, opt: { value?: any } | null) => {
+      if (opt && opt.value) openReader(opt.value as string);
+    });
+
+    historyBox.add(historySelect);
+    historySelect.focus();
+
+    const hintRow = new BoxRenderable(renderer, { flexDirection: "row", width: "100%" });
+    hintRow.add(new TextRenderable(renderer, {
+      content: `Enter open · / search · f filter:${historyFilter} · [/] page · Esc close`,
+      fg: "#555555",
+    }));
+    historyBox.add(hintRow);
+
     return historyBox;
+  }
+
+  function buildHistoryReader() {
+    const session = historyReaderId
+      ? stats.sessions.find(s => s.id === historyReaderId) ?? null
+      : null;
+
+    const readerBox = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, paddingX: 1, gap: 1 });
+
+    if (!session) {
+      readerBox.add(new TextRenderable(renderer, { content: "Session not found — press Esc to go back.", fg: "#FF6666" }));
+      return readerBox;
+    }
+
+    const d = new Date(session.startedAt);
+    const header = new BoxRenderable(renderer, { flexDirection: "row", justifyContent: "space-between", width: "100%" });
+    header.add(new TextRenderable(renderer, {
+      content: `READING · ${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+      fg: "#FFFF00", attributes: TextAttributes.BOLD,
+    }));
+    header.add(new TextRenderable(renderer, { content: `${session.wordCount}w · ${session.xpEarned || 0}xp`, fg: "#00FF00" }));
+    readerBox.add(header);
+
+    if (!session.content) {
+      readerBox.add(new TextRenderable(renderer, { content: "(empty session)", fg: "#666666" }));
+    } else {
+      historyScroll = new ScrollBoxRenderable(renderer, { flexGrow: 1, scrollY: true, stickyStart: "top", paddingX: 1 });
+      historyScroll.content.add(new TextRenderable(renderer, {
+        content: wrapText(session.content, Math.max(20, process.stdout.columns - 6)),
+        fg: "#DDDDDD",
+      }));
+      readerBox.add(historyScroll);
+      historyScroll.focus();
+    }
+
+    const hint = new TextRenderable(renderer, { content: "r resume · ↑↓ scroll · Esc back", fg: "#555555" });
+    readerBox.add(hint);
+
+    return readerBox;
+  }
+
+  function openReader(id: string) {
+    historyReaderId = id;
+    historyView = "reader";
+    buildMiddleSection();
   }
 
   function buildGuide() {
@@ -576,6 +729,7 @@ async function main() {
       editorWrapper.add(statsRow);
       middleContainer.add(editorWrapper);
 
+      input.focus();
       updateEditor();
     }
 
