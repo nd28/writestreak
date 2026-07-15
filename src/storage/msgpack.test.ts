@@ -29,6 +29,7 @@ describe("msgpack storage", () => {
       expect(stats.totalSessions).toBe(0);
       expect(stats.sessions).toEqual([]);
       expect(stats.lastWriteDate).toBeNull();
+      expect(stats.primaryColor).toBe("#00FF00");
     });
   });
 

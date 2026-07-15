@@ -53,5 +53,7 @@ export function getDefaultStats(): PlayerStats {
     totalSessions: 0,
     sessions: [],
     lastWriteDate: null,
+    primaryColor: "#00FF00",
+    guideSeen: false,
   };
 }

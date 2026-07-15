@@ -153,6 +153,8 @@ describe("scoring", () => {
       totalSessions: 0,
       sessions: [],
       lastWriteDate,
+      primaryColor: "#00FF00",
+      guideSeen: false,
     });
 
     it("returns streak 1 when first write", () => {

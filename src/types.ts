@@ -18,6 +18,8 @@ export interface PlayerStats {
   totalSessions: number;
   sessions: WritingSession[];
   lastWriteDate: string | null;
+  primaryColor: string;
+  guideSeen: boolean;
 }
 
 export interface ScorePopup {
