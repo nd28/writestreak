@@ -59,7 +59,7 @@ src/
 
 ## Current State
 
-**Version:** 1.3.1
+**Version:** 1.3.2
 
 ### Features Implemented
 - Full OpenTUI imperative UI (no React/Ink)
@@ -87,7 +87,7 @@ src/
 - Global CLI: `writestreak` / `ws`
 
 ### Known Issues
-- "Glitch in last 2 rows of display" — reported but not yet investigated
+- (none currently)
 
 ### Keyboard Shortcuts
 - `Ctrl+N` — new session (saves current)

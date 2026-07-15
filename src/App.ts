@@ -361,7 +361,7 @@ async function main() {
 
   const input = new TextareaRenderable(renderer, {
     id: "editor-input",
-    width: 100,
+    width: "100%",
     wrapMode: "word",
     placeholder: "",
     backgroundColor: "transparent",
@@ -508,7 +508,6 @@ async function main() {
       const statsRow = new BoxRenderable(renderer, {
         flexDirection: "row",
         justifyContent: "space-between",
-        flexGrow: 1,
         paddingX: 2
       });
 
