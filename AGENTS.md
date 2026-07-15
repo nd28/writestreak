@@ -67,39 +67,41 @@ src/
 - Banner scoreboard: full-width bordered box with 5 stat blocks (XP, WORDS, STREAK, SESSIONS, LONGEST)
 - Level progress bar with XP progress text
 - Multiline editor via `TextareaRenderable` (Enter inserts newlines, no 1000-char limit)
-- Auto-resume: last session content loaded on startup
+- Auto-resume: last session content loaded on startup with toast notification
 - Session save / new session / export to .wbin
 - Session history view (Ctrl+H or mode cycle), shows last 15 sessions
-- Insights panel (Ctrl+I or mode cycle): empty state for new users, disk, avg words, best session, time, best day, 7-day bar chart
+- Insights panel (Ctrl+I or mode cycle): disk size, avg words, best session, time writing, best day, 7-day bar chart
 - First-launch guide (skippable with `--skip-guide`)
 - Color theming via `--color #hex` flag, persisted to save file
 - Color cycling button in banner (Rose / Sky / Dim), label shows current color name
 - Clickable mode label — cycles writing → history → insights
-- Flash feedback: mode label flashes white on mode switch (500ms), banner border flashes on color cycle (300ms)
 - Mouse support enabled
 - Version display (`v{VERSION}`) next to WRITESTREAK title
 - Message bar with timed toasts ("Session saved!", "Exported to...", etc.)
 - Live XP feedback text (`+{n} XP`) in editor stats row, auto-clears after 1.5s; gold if streak active, green otherwise
-- Milestone popup: magenta text ("🎉 50 words! +50 XP") in stats row, auto-clears after 3s
-- Level-up celebration toast: prominent 3-second toast when crossing a level threshold (e.g. "⬆ LEVEL UP! Apprentice Writer (LVL 2)"). Shows XP/word bonus for next level.
-- Streak fire indicator: 🔥 emoji(s) scale with streak length (1-4 fires, color gradient gold → orange → red), includes "streak" label text
-- Session XP tracking: XP accumulated per session is stored and displayed in history (`· {n} XP`) and insights best session
+- Milestone popup display (🎉 50 words! +50 XP) in magenta, 3s timeout
+- Level-up celebration toast: prominent 3-second toast with level title and bonus description
+- Streak fire indicator: 🔥 emoji(s) scale with streak length (1-4 fires, color gradient gold → orange → red) + "streak" label
+- Session XP tracking: XP accumulated per session is stored and displayed in history and insights
+- Mode switch flash feedback: mode label flashes white on mode change
+- Color cycling flash: banner border flashes on color change
+- Save feedback: mode label flashes green on Ctrl+S, "Saved. Goodbye!" on Ctrl+Q
+- Editor placeholder: "Start typing..." when editor is empty
+- Empty states: history and insights panels show helpful messages when no data
+- Responsive layout: editor wrapper has minWidth for narrow terminals
 - MessagePack binary storage (`writestreak.bin`)
 - 59 unit tests (scoring, levels, msgpack) — all passing
-- Save feedback flash: mode label flashes green on Ctrl+S
-- Goodbye message toast on Ctrl+Q ("Saved. Goodbye!") before exit
-- Resume toast on auto-resume ("Resumed from last session (n words)")
 - Global CLI: `writestreak` / `ws`
 
 ### Known Issues
-- (none currently)
+- Text wrapping may not work perfectly on first render (workaround: type and text wraps correctly after first resize)
 
 ### Keyboard Shortcuts
 - `Ctrl+N` — new session (saves current)
-- `Ctrl+S` — save session
+- `Ctrl+S` — save session (green flash feedback)
 - `Ctrl+H` — toggle history
 - `Ctrl+I` — toggle insights
 - `Ctrl+E` — export to .wbin
-- `Ctrl+Q` — save and quit
+- `Ctrl+Q` — save and quit (shows goodbye message)
 - `Ctrl+C` — exit (via OpenTUI exitOnCtrlC)
 - Mouse: click mode label to cycle modes, click color button to cycle colors
