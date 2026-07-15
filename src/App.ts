@@ -384,7 +384,8 @@ async function main() {
 
   const input = new TextareaRenderable(renderer, {
     id: "editor-input",
-    width: "100%",
+    width: 100,
+    flexGrow: 1,
     wrapMode: "word",
     placeholder: "Start typing...",
     placeholderColor: "#555555",
