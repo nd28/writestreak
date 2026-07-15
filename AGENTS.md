@@ -59,7 +59,7 @@ src/
 
 ## Current State
 
-**Version:** 1.3.10
+**Version:** 1.4.0
 
 ### Features Implemented
 - Full OpenTUI imperative UI (no React/Ink)
@@ -86,6 +86,9 @@ src/
 - Session XP tracking: XP accumulated per session is stored and displayed in history (`· {n} XP`) and insights best session
 - MessagePack binary storage (`writestreak.bin`)
 - 59 unit tests (scoring, levels, msgpack) — all passing
+- Save feedback flash: mode label flashes green on Ctrl+S
+- Goodbye message toast on Ctrl+Q ("Saved. Goodbye!") before exit
+- Resume toast on auto-resume ("Resumed from last session (n words)")
 - Global CLI: `writestreak` / `ws`
 
 ### Known Issues

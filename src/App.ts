@@ -54,6 +54,9 @@ async function main() {
   if (lastSession?.content) {
     currentText = lastSession.content;
     prevWordCount = countWords(currentText);
+    setTimeout(() => {
+      showMessage(`Resumed from last session (${prevWordCount} words)`);
+    }, 500);
   }
 
   const streakInfo = updateStreak(stats);
@@ -166,10 +169,12 @@ async function main() {
 
     if (key.ctrl && key.name === "q") {
       saveSession();
-      setTimeout(() => renderer.destroy(), 100);
+      showMessage("Saved. Goodbye!");
+      setTimeout(() => renderer.destroy(), 500);
     }
     if (key.ctrl && key.name === "s") {
       saveSession();
+      flashModeLabel("#00FF00", 300);
     }
     if (key.ctrl && key.name === "e") {
       exportBin();
