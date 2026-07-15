@@ -516,12 +516,12 @@ async function main() {
 
       wordCountText = new TextRenderable(renderer, {
         content: `${countWords(currentText)} words · ${currentText.length} chars`,
-        fg: "#888888"
+        fg: "#666666"
       });
 
       lineCountText = new TextRenderable(renderer, {
         content: `Ln ${currentText.split("\n").length}`,
-        fg: "#888888"
+        fg: "#666666"
       });
 
       xpGainText = new TextRenderable(renderer, {

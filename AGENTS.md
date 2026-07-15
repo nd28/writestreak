@@ -59,7 +59,7 @@ src/
 
 ## Current State
 
-**Version:** 1.3.2
+**Version:** 1.3.4
 
 ### Features Implemented
 - Full OpenTUI imperative UI (no React/Ink)
