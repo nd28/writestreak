@@ -1,7 +1,7 @@
 import { createCliRenderer, Box, Text, TextAttributes, TextareaRenderable, BoxRenderable, TextRenderable } from "@opentui/core";
 import { existsSync, statSync } from "fs";
 import { countWords, calculateXp, updateStreak } from "./game/scoring.js";
-import { getLevelInfo } from "./game/levels.js";
+import { getLevelInfo, LEVELS } from "./game/levels.js";
 import { exportToBin, importFromBin, getDefaultStats } from "./storage/msgpack.js";
 import type { PlayerStats, WritingSession } from "./types.js";
 import pkg from "../package.json" with { type: "json" };
@@ -359,6 +359,8 @@ async function main() {
   let lineCountText: TextRenderable | null = null;
   let xpGainText: TextRenderable | null = null;
   let xpGainTimeout: NodeJS.Timeout | null = null;
+  let milestoneText: TextRenderable | null = null;
+  let milestoneTimeout: NodeJS.Timeout | null = null;
   let modeText: TextRenderable | null = null;
   let messageText: TextRenderable | null = null;
   let middleContainer: BoxRenderable | null = null;
@@ -381,7 +383,7 @@ async function main() {
       const newWordCount = countWords(currentText);
 
       if (newWordCount > oldWordCount) {
-        const { xp } = calculateXp(newWordCount, oldWordCount, streakInfo.streak);
+        const { xp, popups } = calculateXp(newWordCount, oldWordCount, streakInfo.streak);
         stats = {
           ...stats,
           totalXp: stats.totalXp + xp,
@@ -397,13 +399,24 @@ async function main() {
           if (xpGainTimeout) clearTimeout(xpGainTimeout);
           xpGainTimeout = setTimeout(() => {
             if (xpGainText) xpGainText.content = "";
-          }, 2000);
+          }, 1500);
+        }
+
+        const milestonePopup = popups.find(p => p.text.includes("words!"));
+        if (milestonePopup && milestoneText) {
+          milestoneText.content = `🎉 ${milestonePopup.text}`;
+          if (milestoneTimeout) clearTimeout(milestoneTimeout);
+          milestoneTimeout = setTimeout(() => {
+            if (milestoneText) milestoneText.content = "";
+          }, 3000);
         }
 
         const currentLevel = getLevelInfo(stats.totalXp).level;
         if (currentLevel > previousLevel) {
           const levelInfo = getLevelInfo(stats.totalXp);
-          showMessageLevelUp(`⬆ LEVEL UP! ${levelInfo.title} (LVL ${levelInfo.level})`);
+          const nextLevel = LEVELS.find(l => l.level === currentLevel + 1);
+          const bonusText = nextLevel ? ` → 2 XP/word bonus` : "";
+          showMessageLevelUp(`⬆ LEVEL UP! ${levelInfo.title} (LVL ${levelInfo.level})${bonusText}`);
           stats = { ...stats, level: currentLevel };
           previousLevel = currentLevel;
         }
@@ -531,9 +544,15 @@ async function main() {
         fg: "#00FF00"
       });
 
+      milestoneText = new TextRenderable(renderer, {
+        content: "",
+        fg: "#FF00FF"
+      });
+
       statsRow.add(wordCountText);
       statsRow.add(lineCountText);
       statsRow.add(xpGainText);
+      statsRow.add(milestoneText);
       editorWrapper.add(input);
       editorWrapper.add(statsRow);
       middleContainer.add(editorWrapper);
