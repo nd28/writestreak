@@ -7,7 +7,7 @@ WriteStreak is a gamified terminal writing app built with OpenTUI (imperative AP
 - **Runtime:** Bun (`#!/usr/bin/env bun` shebang in `src/index.ts`)
 - **UI Framework:** `@opentui/core` (imperative `BoxRenderable` / `TextRenderable` / `TextareaRenderable`)
 - **Storage:** `@msgpack/msgpack` binary format (`writestreak.bin`)
-- **Tests:** Vitest (59 tests across scoring, levels, msgpack)
+- **Tests:** Vitest (74 tests across scoring, levels, msgpack, history filter)
 - **Build:** `npm run build` → `tsc` → `dist/`
 - **Dev:** `bun src/index.ts` or `npm run dev`
 - **Global CLI:** `writestreak` / `ws` (linked via `bin` in package.json)
@@ -45,6 +45,9 @@ src/
     levels.ts       12-level progression table (Novice Scribe → God of Words)
   storage/
     msgpack.ts      exportToBin / importFromBin / getDefaultStats (MessagePack binary)
+  history/
+    filter.ts       filterSessions + FilterInput/FilterResult/PAGE_SIZE/FILTER_ORDER (pure, no UI)
+    filter.test.ts  Vitest unit tests
 ```
 
 ### Key Implementation Notes
@@ -59,7 +62,7 @@ src/
 
 ## Current State
 
-**Version:** 1.4.0
+**Version:** 1.5.0
 
 ### Features Implemented
 - Full OpenTUI imperative UI (no React/Ink)
@@ -69,7 +72,10 @@ src/
 - Multiline editor via `TextareaRenderable` (Enter inserts newlines, no 1000-char limit)
 - Auto-resume: last session content loaded on startup with toast notification
 - Session save / new session / export to .wbin
-- Session history view (Ctrl+H or mode cycle), shows last 15 sessions
+- Session history: searchable (content+title, case-insensitive), paginated (20 per page), metadata filters (all/date/words/xp)
+- Session reader: scrollable word-wrapped full-text view for any past session (Enter to open, ↑↓ to scroll, Esc to close)
+- Resume into editor: press `r` in reader to load a past session's content into the editor as a new session (original preserved)
+- Pure filter module: `src/history/filter.ts` (no UI deps; unit-tested in `src/history/filter.test.ts`)
 - Insights panel (Ctrl+I or mode cycle): disk size, avg words, best session, time writing, best day, 7-day bar chart
 - First-launch guide (skippable with `--skip-guide`)
 - Color theming via `--color #hex` flag, persisted to save file
@@ -90,7 +96,7 @@ src/
 - Empty states: history and insights panels show helpful messages when no data
 - Responsive layout: editor wrapper has minWidth for narrow terminals
 - MessagePack binary storage (`writestreak.bin`)
-- 59 unit tests (scoring, levels, msgpack) — all passing
+- 74 unit tests (scoring, levels, msgpack, history filter) — all passing
 - Global CLI: `writestreak` / `ws`
 
 ### Known Issues
@@ -99,7 +105,9 @@ src/
 ### Keyboard Shortcuts
 - `Ctrl+N` — new session (saves current)
 - `Ctrl+S` — save session (green flash feedback)
-- `Ctrl+H` — toggle history
+- `Ctrl+H` — toggle history / exit reader
+- (history list) `/` — focus search · `f` — cycle filter · `[`/`]` — prev/next page · `Enter` — open reader · `Esc` — clear search/filter or close
+- (history reader) `r` — resume into editor · `↑/↓` — scroll · `Esc` — back to list
 - `Ctrl+I` — toggle insights
 - `Ctrl+E` — export to .wbin
 - `Ctrl+Q` — save and quit (shows goodbye message)
