@@ -77,6 +77,7 @@ async function main() {
   let searchFocused = false;
   let searchInput: InputRenderable | null = null;
   let historySelect: SelectRenderable | null = null;
+  let historyHeaderRightRef: TextRenderable | null = null;
   let historyScroll: ScrollBoxRenderable | null = null;
 
   const lastSession = stats.sessions.length > 0 ? stats.sessions[stats.sessions.length - 1] : null;
@@ -153,6 +154,7 @@ async function main() {
     prevWordCount = countWords(currentText);
     sessionXp = 0;
     historyView = "list";
+    historyReaderId = null;
     mode = "writing";
     buildMiddleSection();
     updateEditor();
@@ -241,6 +243,78 @@ async function main() {
       }
     }
 
+    if (mode === "history" && historyView === "list" && searchFocused) {
+      if (key.name === "escape") {
+        searchFocused = false;
+        historyQuery = "";
+        historyPage = 0;
+        historySelectedId = null;
+        if (searchInput) searchInput.blur();
+        buildMiddleSection();
+        return;
+      }
+      if (key.name === "return") {
+        if (searchInput) searchInput.blur();
+        return;
+      }
+      return;
+    }
+
+    if (mode === "history" && historyView === "list" && !searchFocused) {
+      if (key.ctrl && key.name === "h") {
+        toggleHistory();
+        return;
+      }
+      if (key.name === "escape") {
+        if (historyQuery || historyFilter !== "all") {
+          historyQuery = "";
+          historyFilter = "all";
+          historyPage = 0;
+          historySelectedId = null;
+          buildMiddleSection();
+        } else {
+          toggleHistory();
+        }
+        return;
+      }
+      if (key.name === "slash") {
+        searchFocused = true;
+        if (searchInput) searchInput.focus();
+        return;
+      }
+      if (key.name === "f" && !key.ctrl) {
+        const idx = FILTER_ORDER.indexOf(historyFilter);
+        historyFilter = FILTER_ORDER[(idx + 1) % FILTER_ORDER.length];
+        historyPage = 0;
+        historySelectedId = null;
+        buildMiddleSection();
+        return;
+      }
+      if (key.name === "[") {
+        if (historyPage > 0) {
+          historyPage--;
+          historySelectedId = null;
+          buildMiddleSection();
+        }
+        return;
+      }
+      if (key.name === "]") {
+        historyPage++;
+        historySelectedId = null;
+        buildMiddleSection();
+        return;
+      }
+      if (historySelect && (key.name === "up" || key.name === "down" || key.name === "pageup" || key.name === "pagedown" || key.name === "home" || key.name === "end")) {
+        historySelect.handleKeyPress(key);
+        return;
+      }
+      if (key.name === "return") {
+        const sel = historySelect?.getSelectedOption();
+        if (sel && sel.value) openReader(sel.value as string);
+        return;
+      }
+    }
+
     if (key.ctrl && key.name === "q") {
       saveSession();
       showMessage("Saved. Goodbye!");
@@ -286,8 +360,14 @@ async function main() {
 
     const headerRow = new BoxRenderable(renderer, { flexDirection: "row", justifyContent: "space-between", width: "100%" });
     headerRow.add(new TextRenderable(renderer, { content: "SESSION HISTORY", fg: "#FFFF00", attributes: TextAttributes.BOLD }));
-    headerRow.add(new TextRenderable(renderer, { content: `${total} sessions · Pg [${page + 1}/${totalPages}]`, fg: "#888888" }));
+    historyHeaderRightRef = new TextRenderable(renderer, { content: `${total} sessions · Pg [${page + 1}/${totalPages}]`, fg: "#888888" });
+    headerRow.add(historyHeaderRightRef);
     historyBox.add(headerRow);
+
+    const searchRow = new BoxRenderable(renderer, { flexDirection: "row", width: "100%", gap: 1 });
+    searchRow.add(new TextRenderable(renderer, { content: "Search:", fg: "#888888" }));
+    if (searchInput) searchRow.add(searchInput);
+    historyBox.add(searchRow);
 
     if (total === 0) {
       historyBox.add(new TextRenderable(renderer, { content: "No sessions match — start writing!", fg: "#666666" }));
@@ -331,6 +411,8 @@ async function main() {
     }));
     historyBox.add(hintRow);
 
+    if (searchFocused && searchInput) searchInput.focus();
+
     return historyBox;
   }
 
@@ -360,7 +442,7 @@ async function main() {
     } else {
       historyScroll = new ScrollBoxRenderable(renderer, { flexGrow: 1, scrollY: true, stickyStart: "top", paddingX: 1 });
       historyScroll.content.add(new TextRenderable(renderer, {
-        content: wrapText(session.content, Math.max(20, process.stdout.columns - 6)),
+        content: wrapText(session.content, Math.max(20, (process.stdout.columns ?? 86) - 6)),
         fg: "#DDDDDD",
       }));
       readerBox.add(historyScroll);
@@ -602,6 +684,23 @@ async function main() {
   input.setText(currentText);
   input.focus();
 
+  searchInput = new InputRenderable(renderer, {
+    value: historyQuery,
+    placeholder: "content / title…  (/ focus · Esc clears)",
+    maxLength: 200,
+    backgroundColor: "transparent",
+    textColor: "#FFFFFF",
+    cursorColor: primaryColor,
+    placeholderColor: "#555555",
+    onContentChange: () => {
+      if (!searchInput) return;
+      historyQuery = searchInput.value;
+      historyPage = 0;
+      historySelectedId = null;
+      refreshHistoryList();
+    },
+  });
+
   function updateHeaderStats() {
     const levelInfo = getLevelInfo(stats.totalXp);
     const barWidth = 30;
@@ -664,6 +763,33 @@ async function main() {
     if (messageText) {
       messageText.content = message;
       messageText.visible = message.length > 0;
+    }
+  }
+
+  function refreshHistoryList() {
+    if (!historySelect) return;
+    const { pageItems, total, totalPages, page } = filterSessions(stats.sessions, {
+      query: historyQuery,
+      filter: historyFilter,
+      page: historyPage,
+      pageSize: PAGE_SIZE,
+    });
+    historyPage = page;
+    historySelect.options = pageItems.map((s, i) => {
+      const d = new Date(s.startedAt);
+      const dateStr = d.toLocaleDateString();
+      const timeStr = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const preview = s.content ? s.content.replace(/\n/g, " ").slice(0, 40) : "(empty)";
+      return {
+        name: `${String(i + 1).padStart(2)}. ${dateStr} ${timeStr}  ${s.wordCount}w ${s.xpEarned || 0}xp  ${preview}`,
+        description: "",
+        value: s.id,
+      };
+    });
+    if (historySelect) historySelect.setSelectedIndex(0);
+    historySelectedId = pageItems[0]?.id ?? null;
+    if (historyHeaderRightRef) {
+      historyHeaderRightRef.content = `${total} sessions · Pg [${page + 1}/${totalPages}]`;
     }
   }
 
