@@ -233,11 +233,10 @@ async function main() {
         return;
       }
       if (key.ctrl && key.name === "h") {
-        historyView = "list";
-        buildMiddleSection();
+        toggleHistory();
         return;
       }
-      if (historyScroll && (key.name === "up" || key.name === "down" || key.name === "pageup" || key.name === "pagedown" || key.name === "home" || key.name === "end")) {
+      if (historyScroll && (key.name === "up" || key.name === "down" || key.name === "pageup" || key.name === "pagedown" || key.name === "home" || key.name === "end" || key.name === "k" || key.name === "j")) {
         historyScroll.handleKeyPress(key);
         return;
       }
@@ -247,6 +246,7 @@ async function main() {
       if (key.name === "escape") {
         searchFocused = false;
         historyQuery = "";
+        if (searchInput) searchInput.value = historyQuery;
         historyPage = 0;
         historySelectedId = null;
         if (searchInput) searchInput.blur();
@@ -268,6 +268,7 @@ async function main() {
       if (key.name === "escape") {
         if (historyQuery || historyFilter !== "all") {
           historyQuery = "";
+          if (searchInput) searchInput.value = historyQuery;
           historyFilter = "all";
           historyPage = 0;
           historySelectedId = null;
@@ -304,13 +305,8 @@ async function main() {
         buildMiddleSection();
         return;
       }
-      if (historySelect && (key.name === "up" || key.name === "down" || key.name === "pageup" || key.name === "pagedown" || key.name === "home" || key.name === "end")) {
+      if (historySelect && (key.name === "up" || key.name === "down" || key.name === "pageup" || key.name === "pagedown" || key.name === "home" || key.name === "end" || key.name === "k" || key.name === "j")) {
         historySelect.handleKeyPress(key);
-        return;
-      }
-      if (key.name === "return") {
-        const sel = historySelect?.getSelectedOption();
-        if (sel && sel.value) openReader(sel.value as string);
         return;
       }
     }
