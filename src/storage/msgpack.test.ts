@@ -221,3 +221,68 @@ describe("msgpack storage", () => {
     });
   });
 });
+
+describe("draft persistence (autosave)", () => {
+  const draftPath = "./test-writestreak-draft.bin";
+
+  afterEach(() => {
+    if (existsSync(draftPath)) unlinkSync(draftPath);
+  });
+
+  it("defaults to no draft", () => {
+    expect(getDefaultStats().draft).toBeNull();
+  });
+
+  it("round-trips a draft through the binary format", () => {
+    const stats = {
+      ...getDefaultStats(),
+      draft: { content: "half a thought", startedAt: 1000, xpEarned: 42, updatedAt: 2000 },
+    };
+    exportToBin(stats, draftPath);
+    const loaded = importFromBin(draftPath);
+    expect(loaded?.draft).toEqual({
+      content: "half a thought",
+      startedAt: 1000,
+      xpEarned: 42,
+      updatedAt: 2000,
+    });
+  });
+
+  it("round-trips a cleared draft", () => {
+    exportToBin({ ...getDefaultStats(), draft: null }, draftPath);
+    expect(importFromBin(draftPath)?.draft).toBeNull();
+  });
+
+  it("preserves multi-line drafts exactly", () => {
+    const content = "line one\n\nline three\twith tab";
+    exportToBin({ ...getDefaultStats(), draft: { content, startedAt: 1, xpEarned: 0, updatedAt: 2 } }, draftPath);
+    expect(importFromBin(draftPath)?.draft?.content).toBe(content);
+  });
+
+  it("loads a pre-autosave save file, leaving draft undefined rather than throwing", () => {
+    // Simulates a file written before the draft field existed.
+    const legacy: any = { ...getDefaultStats() };
+    delete legacy.draft;
+    exportToBin(legacy, draftPath);
+    const loaded = importFromBin(draftPath);
+    expect(loaded).not.toBeNull();
+    expect(loaded?.draft ?? null).toBeNull();
+    expect(loaded?.sessions).toEqual([]);
+  });
+
+  it("keeps a draft alongside saved sessions", () => {
+    const stats = {
+      ...getDefaultStats(),
+      totalSessions: 1,
+      sessions: [{
+        id: "x1", title: "t", content: "saved", wordCount: 1, charCount: 5,
+        startedAt: 1, endedAt: 2, xpEarned: 3,
+      }],
+      draft: { content: "unsaved", startedAt: 9, xpEarned: 1, updatedAt: 10 },
+    };
+    exportToBin(stats, draftPath);
+    const loaded = importFromBin(draftPath);
+    expect(loaded?.sessions).toHaveLength(1);
+    expect(loaded?.draft?.content).toBe("unsaved");
+  });
+});

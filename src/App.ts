@@ -1,11 +1,15 @@
 import { createCliRenderer, Box, Text, TextAttributes, TextareaRenderable, BoxRenderable, TextRenderable, ScrollBoxRenderable, InputRenderable, SelectRenderable } from "@opentui/core";
-import { existsSync, statSync } from "fs";
+import { existsSync, statSync, writeFileSync } from "fs";
 import { countWords, calculateXp, updateStreak } from "./game/scoring.js";
 import { getLevelInfo, LEVELS } from "./game/levels.js";
 import { exportToBin, importFromBin, getDefaultStats } from "./storage/msgpack.js";
 import { filterSessions, PAGE_SIZE, FILTER_ORDER } from "./history/filter.js";
 import type { FilterKind } from "./history/filter.js";
-import type { PlayerStats, WritingSession } from "./types.js";
+import { formatSession, shareFilename, SHARE_FORMAT_KEYS, SHARE_FORMAT_LABELS } from "./share/format.js";
+import type { ShareFormat } from "./share/format.js";
+import { HELP_SECTIONS } from "./help/keymap.js";
+import type { HelpSection } from "./help/keymap.js";
+import type { PlayerStats, WritingSession, DraftSession } from "./types.js";
 import pkg from "../package.json" with { type: "json" };
 
 const VERSION = pkg.version;
@@ -44,9 +48,57 @@ function wrapText(text: string, width: number): string {
 
 async function main() {
   const renderer = await createCliRenderer({
-    exitOnCtrlC: true,
+    // Handled below instead, so Ctrl+C can flush the draft before teardown.
+    exitOnCtrlC: false,
     useMouse: true,
   });
+
+  // Destroying the renderer frees every renderable's TextBuffer. A timer that
+  // fires afterwards (a toast clearing, a flash reverting) would write to freed
+  // memory and crash with "TextBuffer is destroyed". Route every deferred UI
+  // write through `later()` so shutdown can cancel it, and treat the renderer's
+  // own destroy event as shutdown so Ctrl+C is covered too.
+  let shuttingDown = false;
+  const pendingTimers = new Set<NodeJS.Timeout>();
+
+  function later(fn: () => void, ms: number): NodeJS.Timeout {
+    const timer = setTimeout(() => {
+      pendingTimers.delete(timer);
+      if (shuttingDown || renderer.isDestroyed) return;
+      fn();
+    }, ms);
+    pendingTimers.add(timer);
+    return timer;
+  }
+
+  function cancel(timer: NodeJS.Timeout | null) {
+    if (!timer) return;
+    clearTimeout(timer);
+    pendingTimers.delete(timer);
+  }
+
+  function shutdown() {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    flushDraft();
+    for (const timer of pendingTimers) clearTimeout(timer);
+    pendingTimers.clear();
+  }
+
+  renderer.on("destroy", shutdown);
+
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      flushDraft();
+      shutdown();
+      try {
+        renderer.destroy();
+      } catch {
+        // Already torn down; exiting is all that is left.
+      }
+      process.exit(0);
+    });
+  }
 
   let stats = importFromBin(SAVE_PATH) || getDefaultStats();
   const cliColor = parseColorArg();
@@ -58,7 +110,9 @@ async function main() {
   }
 
   let primaryColor = stats.primaryColor || DEFAULT_PRIMARY_COLOR;
-  let mode: "writing" | "history" | "guide" | "insights" = skipGuide || stats.guideSeen ? "writing" : "guide";
+  let mode: "writing" | "history" | "guide" | "insights" | "help" = skipGuide || stats.guideSeen ? "writing" : "guide";
+  // Mode to restore when help closes, so Ctrl+K is a true toggle from anywhere.
+  let modeBeforeHelp: "writing" | "history" | "insights" = "writing";
   let currentText = "";
   let prevWordCount = 0;
   let sessionXp = 0;
@@ -79,12 +133,73 @@ async function main() {
   let historySelect: SelectRenderable | null = null;
   let historyHeaderRightRef: TextRenderable | null = null;
   let historyScroll: ScrollBoxRenderable | null = null;
+  let helpScroll: ScrollBoxRenderable | null = null;
+  // Session awaiting a format choice from the share prompt.
+  let pendingShare: WritingSession | null = null;
+
+  // ---- autosave ---------------------------------------------------------
+  // Typing only mutates `stats` in memory; without this a Ctrl+C, a crash or a
+  // closed terminal loses both the draft and the XP earned in the session.
+  const AUTOSAVE_DELAY_MS = 1500;
+  let draftTimer: NodeJS.Timeout | null = null;
+  let draftDirty = false;
+
+  function currentDraft(): DraftSession | null {
+    if (currentText.trim().length === 0) return null;
+    return {
+      content: currentText,
+      startedAt: sessionStart,
+      xpEarned: sessionXp,
+      updatedAt: Date.now(),
+    };
+  }
+
+  /** Writes the draft and the XP/word/streak totals earned so far. */
+  function flushDraft() {
+    if (draftTimer) {
+      clearTimeout(draftTimer);
+      draftTimer = null;
+    }
+    if (!draftDirty) return;
+    draftDirty = false;
+    stats = { ...stats, draft: currentDraft() };
+    try {
+      exportToBin(stats, SAVE_PATH);
+    } catch {
+      // A failed autosave must never take the editor down; the next one retries.
+      draftDirty = true;
+    }
+  }
+
+  function scheduleDraftSave() {
+    draftDirty = true;
+    if (draftTimer) clearTimeout(draftTimer);
+    draftTimer = setTimeout(flushDraft, AUTOSAVE_DELAY_MS);
+  }
+
+  function clearDraft() {
+    if (draftTimer) {
+      clearTimeout(draftTimer);
+      draftTimer = null;
+    }
+    draftDirty = false;
+    stats = { ...stats, draft: null };
+  }
 
   const lastSession = stats.sessions.length > 0 ? stats.sessions[stats.sessions.length - 1] : null;
-  if (lastSession?.content) {
+  const recoveredDraft = stats.draft?.content?.trim() ? stats.draft : null;
+
+  if (recoveredDraft) {
+    currentText = recoveredDraft.content;
+    prevWordCount = countWords(currentText);
+    sessionXp = recoveredDraft.xpEarned || 0;
+    later(() => {
+      showMessage(`Recovered unsaved draft (${prevWordCount} words) — Ctrl+S to save it`);
+    }, 500);
+  } else if (lastSession?.content) {
     currentText = lastSession.content;
     prevWordCount = countWords(currentText);
-    setTimeout(() => {
+    later(() => {
       showMessage(`Resumed from last session (${prevWordCount} words)`);
     }, 500);
   }
@@ -94,7 +209,7 @@ async function main() {
   function flashModeLabel(color: string, durationMs: number) {
     if (!modeBoxRef) return;
     modeBoxRef.backgroundColor = color;
-    setTimeout(() => {
+    later(() => {
       if (modeBoxRef) modeBoxRef.backgroundColor = primaryColor;
     }, durationMs);
   }
@@ -102,18 +217,26 @@ async function main() {
   function showMessage(msg: string) {
     message = msg;
     updateMessage();
-    if (messageTimeout) clearTimeout(messageTimeout);
-    messageTimeout = setTimeout(() => {
+    cancel(messageTimeout);
+    messageTimeout = later(() => {
       message = "";
       updateMessage();
     }, 2000);
   }
 
+  /** A message that stays until something replaces it (used by the share prompt). */
+  function showPrompt(msg: string) {
+    cancel(messageTimeout);
+    messageTimeout = null;
+    message = msg;
+    updateMessage();
+  }
+
   function showMessageLevelUp(msg: string) {
     message = msg;
     updateMessage();
-    if (messageTimeout) clearTimeout(messageTimeout);
-    messageTimeout = setTimeout(() => {
+    cancel(messageTimeout);
+    messageTimeout = later(() => {
       message = "";
       updateMessage();
     }, 3000);
@@ -133,10 +256,12 @@ async function main() {
       xpEarned: sessionXp,
     };
 
+    clearDraft();
     stats = {
       ...stats,
       totalSessions: stats.totalSessions + 1,
       sessions: [...stats.sessions, session],
+      draft: null,
     };
     exportToBin(stats, SAVE_PATH);
     showMessage("Session saved!");
@@ -164,6 +289,7 @@ async function main() {
 
   function newSession() {
     saveSession();
+    clearDraft();
     currentText = "";
     prevWordCount = 0;
     sessionXp = 0;
@@ -171,6 +297,79 @@ async function main() {
     showMessage("New session started");
     updateEditor();
     updateHeaderStats();
+  }
+
+  function writeShare(session: WritingSession, format: ShareFormat) {
+    const levelInfo = getLevelInfo(stats.totalXp);
+    const path = `./${shareFilename(Date.now(), format)}`;
+    const document = formatSession(
+      session,
+      {
+        level: levelInfo.level,
+        levelTitle: levelInfo.title,
+        streak: stats.currentStreak,
+        version: VERSION,
+      },
+      format
+    );
+
+    try {
+      writeFileSync(path, document, "utf-8");
+      showMessage(`Shared as ${SHARE_FORMAT_LABELS[format]} → ${path}`);
+    } catch (err) {
+      showMessage(`Share failed: ${(err as Error).message}`);
+    }
+  }
+
+  /** Asks which format to write; the next keypress is consumed by resolveShare. */
+  function promptShare(session: WritingSession | null) {
+    if (!session) {
+      showMessage("No session selected to share");
+      return;
+    }
+    if (session.content.trim().length === 0) {
+      showMessage("Nothing to share — this session is empty");
+      return;
+    }
+    pendingShare = session;
+    // Blur the editor so the format key is not typed into the draft.
+    if (mode === "writing") input.blur();
+    showPrompt("Share as:  m Markdown  ·  t Text  ·  h HTML  ·  Esc cancel");
+  }
+
+  function resolveShare(key: { name?: string }) {
+    const session = pendingShare;
+    pendingShare = null;
+    if (mode === "writing") input.focus();
+
+    const format = SHARE_FORMAT_KEYS[key.name ?? ""];
+    if (!session || !format) {
+      showMessage("Share cancelled");
+      return;
+    }
+    writeShare(session, format);
+  }
+
+  function promptShareById(id: string | null) {
+    promptShare(id ? stats.sessions.find(s => s.id === id) ?? null : null);
+  }
+
+  /** Shares the in-progress draft without saving it as a session. */
+  function promptShareDraft() {
+    if (currentText.trim().length === 0) {
+      showMessage("Nothing to share — write something first");
+      return;
+    }
+    promptShare({
+      id: "draft",
+      title: sessionTitle,
+      content: currentText,
+      wordCount: countWords(currentText),
+      charCount: currentText.length,
+      startedAt: sessionStart,
+      endedAt: Date.now(),
+      xpEarned: sessionXp,
+    });
   }
 
   function exportBin() {
@@ -183,6 +382,32 @@ async function main() {
     mode = mode === "history" ? "writing" : "history";
     buildMiddleSection();
     updateModeIndicator();
+  }
+
+  function toggleHelp() {
+    if (mode === "help") {
+      mode = modeBeforeHelp;
+    } else {
+      modeBeforeHelp = mode === "guide" ? "writing" : (mode as "writing" | "history" | "insights");
+      mode = "help";
+    }
+    buildMiddleSection();
+    updateModeIndicator();
+  }
+
+  function quitWithoutSaving() {
+    flushDraft();
+    shutdown();
+    renderer.destroy();
+  }
+
+  function quitApp() {
+    saveSession();
+    showMessage("Saved. Goodbye!");
+    setTimeout(() => {
+      shutdown();
+      renderer.destroy();
+    }, 500);
   }
 
   function toggleInsights() {
@@ -209,7 +434,53 @@ async function main() {
     updateModeIndicator();
   }
 
+  // Ctrl+H arrives as byte 0x08, which parses as `backspace` with ctrl=false, so
+  // `key.ctrl && key.name === "h"` never matched and the documented shortcut was
+  // dead. The real Backspace key sends 0x7f, so the raw byte tells them apart.
+  function isToggleHistoryKey(key: { ctrl: boolean; name: string; sequence: string }): boolean {
+    return (key.ctrl && key.name === "h") || key.sequence === "\b";
+  }
+
+  // Ctrl+I is byte 0x09 — indistinguishable from Tab outside the kitty keyboard
+  // protocol — so Ctrl+L is offered as an alias that always works.
+  function isToggleInsightsKey(key: { ctrl: boolean; name: string }): boolean {
+    return (key.ctrl && key.name === "i") || (key.ctrl && key.name === "l");
+  }
+
   renderer.keyInput.on("keypress", (key) => {
+    // Checked first: Ctrl+C must work from every mode, including the guide,
+    // the help panel and the share prompt.
+    if (key.ctrl && key.name === "c") {
+      quitWithoutSaving();
+      return;
+    }
+
+    // The share prompt owns the very next keypress.
+    if (pendingShare) {
+      resolveShare(key);
+      return;
+    }
+
+    if (mode === "help") {
+      if (key.ctrl && key.name === "q") {
+        quitApp();
+        return;
+      }
+      if (
+        key.name === "escape" ||
+        key.name === "return" ||
+        key.sequence === "?" ||
+        (key.ctrl && key.name === "k")
+      ) {
+        toggleHelp();
+        return;
+      }
+      if (helpScroll && (key.name === "up" || key.name === "down" || key.name === "pageup" || key.name === "pagedown" || key.name === "home" || key.name === "end" || key.name === "k" || key.name === "j")) {
+        helpScroll.handleKeyPress(key);
+      }
+      return;
+    }
+
     if (mode === "guide") {
       if (key.name === "return" || key.name === "escape") {
         closeGuide();
@@ -222,9 +493,17 @@ async function main() {
         resumeSessionIntoEditor();
         return;
       }
+      if (key.name === "s" && !key.ctrl) {
+        promptShareById(historyReaderId);
+        return;
+      }
       if (key.name === "escape") {
         historyView = "list";
         buildMiddleSection();
+        return;
+      }
+      if (isToggleHistoryKey(key)) {
+        toggleHistory();
         return;
       }
       if (key.name === "backspace") {
@@ -232,8 +511,8 @@ async function main() {
         buildMiddleSection();
         return;
       }
-      if (key.ctrl && key.name === "h") {
-        toggleHistory();
+      if (key.sequence === "?" || (key.ctrl && key.name === "k")) {
+        toggleHelp();
         return;
       }
       if (historyScroll && (key.name === "up" || key.name === "down" || key.name === "pageup" || key.name === "pagedown" || key.name === "home" || key.name === "end" || key.name === "k" || key.name === "j")) {
@@ -254,14 +533,18 @@ async function main() {
         return;
       }
       if (key.name === "return") {
+        searchFocused = false;
         if (searchInput) searchInput.blur();
+        // Rebuild so the list is recreated and takes focus back.
+        buildMiddleSection();
         return;
       }
+      if (searchInput) searchInput.handleKeyPress(key);
       return;
     }
 
     if (mode === "history" && historyView === "list" && !searchFocused) {
-      if (key.ctrl && key.name === "h") {
+      if (isToggleHistoryKey(key)) {
         toggleHistory();
         return;
       }
@@ -278,9 +561,17 @@ async function main() {
         }
         return;
       }
-      if (key.name === "slash") {
+      if (key.sequence === "?" || (key.ctrl && key.name === "k")) {
+        toggleHelp();
+        return;
+      }
+      if (key.name === "slash" && !key.shift) {
         searchFocused = true;
         if (searchInput) searchInput.focus();
+        return;
+      }
+      if (key.name === "s" && !key.ctrl) {
+        promptShareById(historySelectedId);
         return;
       }
       if (key.name === "f" && !key.ctrl) {
@@ -312,21 +603,25 @@ async function main() {
     }
 
     if (key.ctrl && key.name === "q") {
-      saveSession();
-      showMessage("Saved. Goodbye!");
-      setTimeout(() => renderer.destroy(), 500);
+      quitApp();
+    }
+    if (key.ctrl && key.name === "k") {
+      toggleHelp();
     }
     if (key.ctrl && key.name === "s") {
       saveSession();
       flashModeLabel("#00FF00", 300);
     }
+    if (key.ctrl && key.name === "g") {
+      promptShareDraft();
+    }
     if (key.ctrl && key.name === "e") {
       exportBin();
     }
-    if (key.ctrl && key.name === "h") {
+    if (isToggleHistoryKey(key)) {
       toggleHistory();
     }
-    if (key.ctrl && key.name === "i") {
+    if (isToggleInsightsKey(key)) {
       toggleInsights();
     }
     if (key.ctrl && key.name === "n") {
@@ -356,7 +651,7 @@ async function main() {
 
     const headerRow = new BoxRenderable(renderer, { flexDirection: "row", justifyContent: "space-between", width: "100%" });
     headerRow.add(new TextRenderable(renderer, { content: "SESSION HISTORY", fg: "#FFFF00", attributes: TextAttributes.BOLD }));
-    historyHeaderRightRef = new TextRenderable(renderer, { content: `${total} sessions · Pg [${page + 1}/${totalPages}]`, fg: "#888888" });
+    historyHeaderRightRef = new TextRenderable(renderer, { content: `${total} sessions · ${historyFilter} · Pg [${page + 1}/${totalPages}]`, fg: "#888888" });
     headerRow.add(historyHeaderRightRef);
     historyBox.add(headerRow);
 
@@ -366,10 +661,19 @@ async function main() {
     historyBox.add(searchRow);
 
     if (total === 0) {
+      historySelectedId = null;
+      historySelect = null;
       historyBox.add(new TextRenderable(renderer, { content: "No sessions match — start writing!", fg: "#666666" }));
       historyBox.add(new TextRenderable(renderer, { content: "Press Esc to clear filters.", fg: "#666666" }));
       return historyBox;
     }
+
+    const initialIndex = historySelectedId
+      ? Math.max(0, pageItems.findIndex(s => s.id === historySelectedId))
+      : 0;
+    // Seed the selection so `s` (share) and `Enter` act on the highlighted row
+    // even before the user has pressed an arrow key.
+    historySelectedId = pageItems[initialIndex]?.id ?? null;
 
     historySelect = new SelectRenderable(renderer, {
       options: pageItems.map((s, i) => {
@@ -380,13 +684,13 @@ async function main() {
         const name = `${String(i + 1).padStart(2)}. ${dateStr} ${timeStr}  ${s.wordCount}w ${s.xpEarned || 0}xp  ${preview}`;
         return { name, description: "", value: s.id };
       }),
-      selectedIndex: historySelectedId
-        ? Math.max(0, pageItems.findIndex(s => s.id === historySelectedId))
-        : 0,
+      selectedIndex: initialIndex,
+      flexGrow: 1,
+      showDescription: false,
       showScrollIndicator: true,
       wrapSelection: false,
-      focusedBackgroundColor: primaryColor,
-      focusedTextColor: "#000000",
+      focusedBackgroundColor: "#333333",
+      focusedTextColor: "#FFFFFF",
       selectedBackgroundColor: "#333333",
     });
 
@@ -402,7 +706,7 @@ async function main() {
 
     const hintRow = new BoxRenderable(renderer, { flexDirection: "row", width: "100%" });
     hintRow.add(new TextRenderable(renderer, {
-      content: `Enter open · / search · f filter:${historyFilter} · [/] page · Esc close`,
+      content: "? help",
       fg: "#555555",
     }));
     historyBox.add(hintRow);
@@ -445,7 +749,7 @@ async function main() {
       historyScroll.focus();
     }
 
-    const hint = new TextRenderable(renderer, { content: "r resume · ↑↓ scroll · Esc back", fg: "#555555" });
+    const hint = new TextRenderable(renderer, { content: "? help", fg: "#555555" });
     readerBox.add(hint);
 
     return readerBox;
@@ -455,6 +759,81 @@ async function main() {
     historyReaderId = id;
     historyView = "reader";
     buildMiddleSection();
+  }
+
+  function buildHelpSection(section: HelpSection) {
+    const box = new BoxRenderable(renderer, { flexDirection: "column" });
+    box.add(new TextRenderable(renderer, {
+      content: section.title,
+      fg: "#FFFF00",
+      attributes: TextAttributes.BOLD,
+    }));
+
+    const keyWidth = Math.max(...section.rows.map(r => r.keys.length));
+    for (const { keys, description } of section.rows) {
+      const row = new BoxRenderable(renderer, { flexDirection: "row", flexWrap: "wrap" });
+      row.add(new TextRenderable(renderer, {
+        content: keys.padEnd(keyWidth + 1),
+        fg: primaryColor,
+        attributes: TextAttributes.BOLD,
+      }));
+      row.add(new TextRenderable(renderer, { content: description, fg: "#888888" }));
+      box.add(row);
+    }
+    return box;
+  }
+
+  function buildHelp() {
+    const helpBox = new BoxRenderable(renderer, {
+      flexDirection: "column",
+      flexGrow: 1,
+      paddingX: 1,
+      gap: 1,
+    });
+
+    const header = new BoxRenderable(renderer, {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      justifyContent: "space-between",
+      width: "100%",
+    });
+    header.add(new TextRenderable(renderer, {
+      content: "KEYBOARD SHORTCUTS",
+      fg: "#FFFF00",
+      attributes: TextAttributes.BOLD,
+    }));
+    header.add(new TextRenderable(renderer, { content: "Ctrl+K or Esc to close", fg: "#888888" }));
+    helpBox.add(header);
+
+    // Two columns so the list stays short; they stack on narrow terminals and
+    // the whole panel scrolls when the terminal is too short to hold it.
+    helpScroll = new ScrollBoxRenderable(renderer, {
+      flexGrow: 1,
+      scrollY: true,
+      stickyStart: "top",
+    });
+
+    const columns = new BoxRenderable(renderer, {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      width: "100%",
+      gap: 3,
+    });
+    const leftColumn = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, minWidth: 30, gap: 1 });
+    const rightColumn = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, minWidth: 30, gap: 1 });
+
+    const split = Math.ceil(HELP_SECTIONS.length / 2);
+    HELP_SECTIONS.forEach((section, i) => {
+      (i < split ? leftColumn : rightColumn).add(buildHelpSection(section));
+    });
+
+    columns.add(leftColumn);
+    columns.add(rightColumn);
+    helpScroll.content.add(columns);
+    helpBox.add(helpScroll);
+    helpScroll.focus();
+
+    return helpBox;
   }
 
   function buildGuide() {
@@ -472,11 +851,10 @@ async function main() {
       Text({ content: "• 12 levels from \"Novice Scribe\" to \"God of Words\"", fg: "#888888" }),
       Text({ content: " " }),
       Text({ content: "CONTROLS", fg: "#FFFF00", attributes: TextAttributes.BOLD }),
-      Text({ content: "• Ctrl+N  New session (saves current)", fg: "#888888" }),
+      Text({ content: "• Ctrl+K  Show every shortcut (press it any time)", fg: "#888888" }),
       Text({ content: "• Ctrl+S  Save session", fg: "#888888" }),
       Text({ content: "• Ctrl+H  Toggle history", fg: "#888888" }),
-      Text({ content: "• Ctrl+I  Toggle insights", fg: "#888888" }),
-      Text({ content: "• Ctrl+E  Export to .wbin", fg: "#888888" }),
+      Text({ content: "• Ctrl+G  Share a session as Markdown / Text / HTML", fg: "#888888" }),
       Text({ content: "• Ctrl+Q  Save and quit", fg: "#888888" }),
       Text({ content: " " }),
       Text({ content: "MOUSE", fg: "#FFFF00", attributes: TextAttributes.BOLD }),
@@ -490,7 +868,8 @@ async function main() {
       Text({ content: "TIPS", fg: "#FFFF00", attributes: TextAttributes.BOLD }),
       Text({ content: "• Write daily to build your streak", fg: "#888888" }),
       Text({ content: "• Sessions auto-resume from last save", fg: "#888888" }),
-      Text({ content: "• Export .wbin files to backup or share", fg: "#888888" }),
+      Text({ content: "• Export .wbin files to backup your whole profile", fg: "#888888" }),
+      Text({ content: "• Ctrl+G writes one session to a shareable file", fg: "#888888" }),
       Text({ content: " " }),
       Text({ content: "Press Enter or Esc to start writing...", fg: primaryColor, attributes: TextAttributes.BOLD })
     );
@@ -615,7 +994,7 @@ async function main() {
 
   const input = new TextareaRenderable(renderer, {
     id: "editor-input",
-    width: 100,
+    width: "100%",
     flexGrow: 1,
     wrapMode: "word",
     placeholder: "Start typing...",
@@ -645,8 +1024,8 @@ async function main() {
         if (xpGainText) {
           xpGainText.content = `+${xp} XP`;
           xpGainText.fg = streakInfo.streak > 0 ? "#FFD700" : "#00FF00";
-          if (xpGainTimeout) clearTimeout(xpGainTimeout);
-          xpGainTimeout = setTimeout(() => {
+          cancel(xpGainTimeout);
+          xpGainTimeout = later(() => {
             if (xpGainText) xpGainText.content = "";
           }, 1500);
         }
@@ -654,8 +1033,8 @@ async function main() {
         const milestonePopup = popups.find(p => p.text.includes("words!"));
         if (milestonePopup && milestoneText) {
           milestoneText.content = `🎉 ${milestonePopup.text}`;
-          if (milestoneTimeout) clearTimeout(milestoneTimeout);
-          milestoneTimeout = setTimeout(() => {
+          cancel(milestoneTimeout);
+          milestoneTimeout = later(() => {
             if (milestoneText) milestoneText.content = "";
           }, 3000);
         }
@@ -672,6 +1051,7 @@ async function main() {
         sessionXp += xp;
       }
 
+      scheduleDraftSave();
       updateEditor();
       updateHeaderStats();
     }
@@ -762,8 +1142,10 @@ async function main() {
     }
   }
 
+  let rebuildingHistory = false;
+
   function refreshHistoryList() {
-    if (!historySelect) return;
+    if (rebuildingHistory) return;
     const { pageItems, total, totalPages, page } = filterSessions(stats.sessions, {
       query: historyQuery,
       filter: historyFilter,
@@ -771,6 +1153,13 @@ async function main() {
       pageSize: PAGE_SIZE,
     });
     historyPage = page;
+
+    if (!historySelect || total === 0) {
+      rebuildingHistory = true;
+      buildMiddleSection();
+      rebuildingHistory = false;
+      return;
+    }
     historySelect.options = pageItems.map((s, i) => {
       const d = new Date(s.startedAt);
       const dateStr = d.toLocaleDateString();
@@ -785,7 +1174,7 @@ async function main() {
     if (historySelect) historySelect.setSelectedIndex(0);
     historySelectedId = pageItems[0]?.id ?? null;
     if (historyHeaderRightRef) {
-      historyHeaderRightRef.content = `${total} sessions · Pg [${page + 1}/${totalPages}]`;
+      historyHeaderRightRef.content = `${total} sessions · ${historyFilter} · Pg [${page + 1}/${totalPages}]`;
     }
   }
 
@@ -798,6 +1187,7 @@ async function main() {
       middleContainer = new BoxRenderable(renderer, {
         flexDirection: "column",
         flexGrow: 1,
+        overflow: "hidden",
         paddingX: 1
       });
     }
@@ -808,18 +1198,23 @@ async function main() {
       middleContainer.add(buildHistory());
     } else if (mode === "insights") {
       middleContainer.add(buildInsights());
+    } else if (mode === "help") {
+      middleContainer.add(buildHelp());
     } else {
       const editorWrapper = new BoxRenderable(renderer, {
         flexDirection: "column",
         flexGrow: 1,
+        width: "100%",
         maxWidth: 100,
-        minWidth: 40,
         alignSelf: "center"
       });
 
       const statsRow = new BoxRenderable(renderer, {
         flexDirection: "row",
+        flexWrap: "wrap",
+        flexShrink: 0,
         justifyContent: "space-between",
+        gap: 1,
         paddingX: 2
       });
 
@@ -876,7 +1271,7 @@ async function main() {
     buildUI();
     if (bannerBoxRef) {
       bannerBoxRef.borderColor = "#FFFFFF";
-      setTimeout(() => {
+      later(() => {
         if (bannerBoxRef) bannerBoxRef.borderColor = newColor;
       }, 300);
     }
@@ -895,6 +1290,7 @@ async function main() {
 
     const headerBox = new BoxRenderable(renderer, {
       flexDirection: "column",
+      flexShrink: 0,
       paddingX: 1,
       paddingBottom: 1
     });
@@ -910,6 +1306,7 @@ async function main() {
 
     const titleRow = new BoxRenderable(renderer, {
       flexDirection: "row",
+      flexWrap: "wrap",
       alignItems: "center",
       justifyContent: "space-between",
       width: "100%"
@@ -985,6 +1382,7 @@ async function main() {
 
     const statsRow = new BoxRenderable(renderer, {
       flexDirection: "row",
+      flexWrap: "wrap",
       justifyContent: "space-between",
       width: "100%",
       marginTop: 1,
@@ -1050,6 +1448,7 @@ async function main() {
 
     const footerBox = new BoxRenderable(renderer, {
       flexDirection: "column",
+      flexShrink: 0,
       paddingX: 1
     });
 
@@ -1096,7 +1495,7 @@ async function main() {
     });
 
     statusRight.add(new TextRenderable(renderer, {
-      content: "^N new  ^S save  ^E export  ^Q quit",
+      content: "^K help",
       fg: "#555555"
     }));
 

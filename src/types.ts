@@ -9,6 +9,14 @@ export interface WritingSession {
   xpEarned: number;
 }
 
+/** Unsaved editor content, persisted so a crash or Ctrl+C cannot lose it. */
+export interface DraftSession {
+  content: string;
+  startedAt: number;
+  xpEarned: number;
+  updatedAt: number;
+}
+
 export interface PlayerStats {
   totalXp: number;
   level: number;
@@ -20,6 +28,8 @@ export interface PlayerStats {
   lastWriteDate: string | null;
   primaryColor: string;
   guideSeen: boolean;
+  /** Optional: absent in save files written before autosave existed. */
+  draft?: DraftSession | null;
 }
 
 export interface ScorePopup {

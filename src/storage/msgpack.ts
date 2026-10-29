@@ -55,5 +55,6 @@ export function getDefaultStats(): PlayerStats {
     lastWriteDate: null,
     primaryColor: "#00FF00",
     guideSeen: false,
+    draft: null,
   };
 }

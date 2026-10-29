@@ -4,3 +4,4 @@ dist/
 *.wbin
 coverage/
 .vitest/
+writestreak-session-*
